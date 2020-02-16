@@ -201,6 +201,12 @@ config MTD_NAND_PNX8550
 	help
 	  This enables the NAND flash controller on the PNX8550.
 
+config MTD_NAND_PNX8550_BADBLOCK
+	bool "PNX8550 flash badblock support"
+	depends on MTD_NAND_PNX8550
+	help
+	  This enables in flash bad block storage support
+
 config MTD_NAND_S3C2410_DEBUG
 	bool "Samsung S3C NAND driver debug"
 	depends on MTD_NAND_S3C2410

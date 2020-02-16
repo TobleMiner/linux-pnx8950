@@ -125,6 +125,35 @@ static struct nand_bbt_descr nand16bit_memorybased = {
 	.pattern = scan_ff_pattern
 };
 
+/* bad block descriptor located in the "middle" of the flash
+ *  this is pretty evil, but since the end is used by the microBTM we don't
+ *  have a real choice here
+ */
+#ifdef MTD_NAND_PNX8550_BADBLOCK
+
+static u8 bbt_pattern[] = {'B', 'b', 't', '0' };
+static u8 mirror_pattern[] = {'1', 't', 'b', 'B' };
+
+static struct nand_bbt_descr nand_main_bbt_decr = {
+	.options = NAND_BBT_ABSPAGE | NAND_BBT_CREATE | NAND_BBT_WRITE |
+			NAND_BBT_2BIT | NAND_BBT_VERSION,
+	.pages[0] = 0x460,
+	.offs = 1,
+	.len = 4,
+	.pattern = bbt_pattern
+};
+
+static struct nand_bbt_descr nand_mirror_bbt_decr = {
+	.options = NAND_BBT_ABSPAGE | NAND_BBT_CREATE | NAND_BBT_WRITE |
+			NAND_BBT_2BIT | NAND_BBT_VERSION,
+	.pages[0] = 0x480,
+	.offs = 1,
+	.len = 4,
+	.pattern = mirror_pattern
+};
+
+#endif
+
 /* OOB Placement information that lines up with the boot loader code */
 /* Legacy interface
 static struct nand_oobinfo nand16bit_oob_16 = {
@@ -719,6 +748,11 @@ int __init pnx8550_nand_init(void)
 	this->badblock_pattern = &nand16bit_memorybased;
 	this->ecclayout = &nand16bit_oob_16;
 //	this->autooob = &nand16bit_oob_16;
+#ifdef MTD_NAND_PNX8550_BADBLOCK
+//    this->options |= NAND_USE_FLASH_BBT;
+	this->bbt_td  = &nand_main_bbt_decr;
+	this->bbt_md  = &nand_mirror_bbt_decr;
+#endif
 
 	transferBuffer =
 	    kmalloc(pnx8550_mtd.writesize + pnx8550_mtd.oobsize,
