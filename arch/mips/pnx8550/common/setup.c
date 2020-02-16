@@ -140,3 +140,17 @@ void __init plat_mem_setup(void)
 		ip3106_baud(UART_BASE, pnx8550_console_port) = 5;
 	}
 }
+
+#ifdef CONFIG_GENERIC_GPIO
+int gpio_to_irq(unsigned int gpio)
+{
+	return -EINVAL;
+}
+EXPORT_SYMBOL(gpio_to_irq);
+
+int irq_to_gpio(unsigned int irq)
+{
+	return -EINVAL;
+}
+EXPORT_SYMBOL(irq_to_gpio);
+#endif
