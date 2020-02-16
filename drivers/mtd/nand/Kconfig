@@ -195,6 +195,12 @@ config MTD_NAND_S3C2410
 	  No board specific support is done by this driver, each board
 	  must advertise a platform_device for the driver to attach.
 
+config MTD_NAND_PNX8550
+	tristate "NAND Flash support for PNX8550"
+	depends on PNX8550 && MTD_NAND
+	help
+	  This enables the NAND flash controller on the PNX8550.
+
 config MTD_NAND_S3C2410_DEBUG
 	bool "Samsung S3C NAND driver debug"
 	depends on MTD_NAND_S3C2410
