@@ -46,6 +46,13 @@ config MTD_NAND_ECC_BCH
 	  ECC codes. They are used with NAND devices requiring more than 1 bit
 	  of error correction.
 
+config MTD_NAND_WINCE_ECC
+	bool "Use WinCE NAND ECC function"
+	default n
+	help
+	  This causes nand drivers to use an alternate ecc functions as used
+	  by Windows CE.
+
 config MTD_SM_COMMON
 	tristate
 	default n
