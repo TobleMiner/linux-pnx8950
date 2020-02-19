@@ -33,6 +33,7 @@
 #include <linux/sched.h>
 #include <linux/string.h>
 #include <linux/types.h>
+#include <linux/platform_device.h>
 #include <linux/mtd/mtd.h>
 #include <linux/mtd/nand.h>
 #include <linux/mtd/nand_ecc.h>
@@ -382,24 +383,6 @@ static u16 pnx8550_nand_read_word(struct mtd_info *mtd)
 	return data;
 }
 
-static int ensure_transfer_buffer(struct mtd_info *mtd) {
-	struct pnx8550_nand *pnx = MTD_TO_PNX(mtd);
-	if(pnx->xfer_buf) {
-		return 0;
-	}
-	pnx->xfer_buf =
-	    kzalloc(mtd->writesize + mtd->oobsize,
-		    GFP_DMA | GFP_KERNEL);
-	if (!pnx->xfer_buf) {
-		printk(KERN_ERR
-		       "Unable to allocate NAND data buffer for PNX8550.\n");
-		BUG();
-		return -ENOMEM;
-	}
-	pr_info("Allocated transfer buffer @%px, size %zu\n", pnx->xfer_buf, mtd->writesize + mtd->oobsize);
-	return 0;
-}
-
 /**
  * pnx8550_nand_write_buf - write buffer to chip
  * @mtd:	MTD device structure
@@ -424,9 +407,6 @@ static void pnx8550_nand_write_buf(struct mtd_info *mtd, const u_char * buf,
 		pr_warning("%s: non-word aligned length requested!\n",
 		       __FUNCTION__);
 	}
-
-	// TODO: Find alternate solution that can handle errors
-	ensure_transfer_buffer(mtd);
 
 	memcpy(pnx->xfer_buf, buf, len);
 	transBuf = pnx->xfer_buf;
@@ -495,9 +475,6 @@ static void pnx8550_nand_read_buf(struct mtd_info *mtd, u_char * buf, int len)
 		pr_warning("%s: non-word aligned length\n", __FUNCTION__);
 	}
 
-	// TODO: Find alternate solution that can handle errors
-	ensure_transfer_buffer(mtd);
-
 	transBuf = pnx->xfer_buf;
 
 	/*
@@ -555,10 +532,6 @@ static int pnx8550_nand_verify_buf(struct mtd_info *mtd, const u_char * buf,
 	/* some sanity checking, word access only please */
 	if (len & 1) {
 		pr_warning("%s: non-word aligned length\n", __FUNCTION__);
-	}
-
-	if((result = ensure_transfer_buffer(mtd))) {
-		return result;
 	}
 
 	pnx8550_nand_read_buf(mtd, pnx->xfer_buf, len);
@@ -1052,10 +1025,9 @@ static void pnx8550_nand_write_page_swecc(struct mtd_info *mtd, struct nand_chip
 
 #endif
 
-/*
- * Main initialization routine
- */
-int __init pnx8550_nand_init(void)
+#define PCIXIO_SIZE 4096
+
+static int pnx8550_nand_probe(struct platform_device *pdev)
 {
 	int err = 0;
 	struct nand_chip *this;
@@ -1068,12 +1040,9 @@ int __init pnx8550_nand_init(void)
 	memset((char *)&pnx_nand, 0, sizeof(struct pnx8550_nand));
 
 	/* Work out address of Nand Flash */
-	nand_base = (u16 *) (KSEG1 | (PNX8550_BASE18_ADDR & (~0x7)));
-
-	nand_base = (u16 *) (((u32) nand_base) +
-			     ((PNX8550_XIO_SEL0 & PNX8550_XIO_SEL0_OFFSET_MASK)
-			      >> PNX8550_XIO_SEL0_OFFSET_SHIFT) * 8 * 1024 *
-			     1024);
+	nand_base = (u16 *)((KSEG1 | (PNX8550_BASE18_ADDR & (~0x7))) +
+				 ((PNX8550_XIO_SEL0 & PNX8550_XIO_SEL0_OFFSET_MASK)
+				  >> PNX8550_XIO_SEL0_OFFSET_SHIFT) * 8 * 1024 * 1024);
 
 	pnx_nand.nand_mem = nand_base;
 //	nand_base_iomem = ioremap(nand_base, )
@@ -1081,6 +1050,8 @@ int __init pnx8550_nand_init(void)
 	/* Link the private data with the MTD structure */
 	pnx_nand.mtd.priv = this;
 	pnx_nand.mtd.name = "pnx8550-nand";
+	pnx_nand.mtd.owner = THIS_MODULE;
+
 	this->chip_delay = 15;
 #ifdef CONFIG_MTD_NAND_PNX8550_16BIT
 	this->options = NAND_BUSWIDTH_16;
@@ -1117,46 +1088,84 @@ int __init pnx8550_nand_init(void)
 	this->bbt_td  = &nand_main_bbt_decr;
 	this->bbt_md  = &nand_mirror_bbt_decr;
 #endif
-	pnx_nand.mtd.owner = THIS_MODULE;
+
+	dev_set_drvdata(&pdev->dev, &pnx_nand);
+
+	if(!request_mem_region(PNX8550_PCIXIO_BASE, PCIXIO_SIZE, "pnx8550-pcixio")) {
+		dev_err(&pdev->dev, "Failed to reserve memory region for PCIXIO");
+		goto fail;
+	}
+
 	if ((err = nand_scan_ident(&pnx_nand.mtd, 1, NULL))) {
-		pr_warning("No NAND flash devices found\n");
-		return err;
+		dev_err(&pdev->dev, "No NAND flash found:  %d", err);
+		goto fail_pcixio_requested;
+	}
+
+	// TODO: Migrate to proper DMA api
+	pnx_nand.xfer_buf = kzalloc(pnx_nand.mtd.writesize + pnx_nand.mtd.oobsize, GFP_DMA | GFP_KERNEL);
+	if (!pnx_nand.xfer_buf) {
+		dev_err(&pdev->dev, "Failed to allocate transfer buffer");
+		err = -ENOMEM;
+		goto fail_pcixio_requested;
 	}
 
 	pnx_nand.is64m = this->chipsize >= (64ull << 20);
 	if (pnx_nand.is64m) {
-		pr_info("Detected flash >= 64MiB, using extended addressing\n");
+		dev_info(&pdev->dev, "Detected flash >= 64MiB, using extended addressing\n");
 	}
 
-	/* Scan to find existence of the device */
+	if(!request_mem_region(virt_to_phys(nand_base),
+	    (resource_size_t)this->chipsize, "pnx8550-mmio")) {
+		dev_err(&pdev->dev, "Failed to reserve memory region for MMIO");
+		goto fail_xfer_alloc;
+	}
+
 	if ((err = nand_scan_tail(&pnx_nand.mtd))) {
-		pr_warning("NAND flash init failed\n");
-		return err;
+		dev_err(&pdev->dev, "NAND flash initialization failed: %d", err);
+		goto fail_mmio_requested;
 	}
 
-	mtd_device_parse_register(&pnx_nand.mtd, part_probes, NULL, NULL, 0);
+	return mtd_device_parse_register(&pnx_nand.mtd, part_probes, NULL, NULL, 0);
 
+fail_mmio_requested:
+	release_mem_region(virt_to_phys(nand_base),
+	    (resource_size_t)this->chipsize);
+fail_xfer_alloc:
+	kfree(pnx_nand.xfer_buf);
+fail_pcixio_requested:
+	release_mem_region(PNX8550_PCIXIO_BASE, PCIXIO_SIZE);
+fail:
 	return err;
 }
 
-module_init(pnx8550_nand_init);
-
-/*
- * Clean up routine
- */
-#ifdef MODULE
-static void __exit pnx8550_nand_cleanup(void)
+static int pnx8550_nand_remove(struct platform_device *pdev)
 {
-	/* Unregister the device */
-	del_mtd_device(&pnx8550_mtd);
-	kfree(pnx_nand.xfer_buf);
+	struct pnx8550_nand *nand = dev_get_drvdata(&pdev->dev);
+	mtd_device_unregister(&nand->mtd);
+	kfree(nand->xfer_buf);
+	return 0;
 }
 
-module_exit(pnx8550_nand_cleanup);
-#endif
+static struct platform_driver pnx8550_nand_plat = {
+	.probe = pnx8550_nand_probe,
+	.remove = pnx8550_nand_remove,
+	.driver = {
+		.name = "pnx8550-nand",
+		.owner = THIS_MODULE,
+	},
+};
+
+/*
+ * Main initialization routine
+ */
+int __init pnx8550_nand_init(void)
+{
+	return platform_driver_register(&pnx8550_nand_plat);
+}
+
+module_init(pnx8550_nand_init);
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Adam Charrett");
 MODULE_AUTHOR("Tobias Schramm");
 MODULE_DESCRIPTION("Driver for 8/16Bit NAND Flash on the XIO bus for PNX8x50");
-
