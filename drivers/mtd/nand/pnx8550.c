@@ -421,6 +421,23 @@ static void pnx8550_nand_write_word(struct mtd_info *mtd, u16 word)
 }
 */
 
+static int ensure_transfer_buffer(struct mtd_info *mtd) {
+	if(transferBuffer) {
+		return 0;
+	}
+	transferBuffer =
+	    kzalloc(mtd->writesize + mtd->oobsize,
+		    GFP_DMA | GFP_KERNEL);
+	if (!transferBuffer) {
+		printk(KERN_ERR
+		       "Unable to allocate NAND data buffer for PNX8550.\n");
+		BUG();
+		return -ENOMEM;
+	}
+	pr_info("Allocated transfer buffer @%px, size %zu\n", transferBuffer, pnx8550_mtd.writesize + pnx8550_mtd.oobsize);
+	return 0;
+}
+
 /**
  * pnx8550_nand_write_buf - write buffer to chip
  * @mtd:	MTD device structure
@@ -442,6 +459,9 @@ static void pnx8550_nand_write_buf(struct mtd_info *mtd, const u_char * buf,
 		printk("%s: non-word aligned length requested!\n",
 		       __FUNCTION__);
 	}
+
+	// TODO: Find alternate solution that can handle errors
+	ensure_transfer_buffer(mtd);
 
 	memcpy(transferBuffer, buf, len);
 	transBuf = transferBuffer;
@@ -509,6 +529,9 @@ static void pnx8550_nand_read_buf(struct mtd_info *mtd, u_char * buf, int len)
 		printk("%s: non-word aligned length\n", __FUNCTION__);
 	}
 
+	// TODO: Find alternate solution that can handle errors
+	ensure_transfer_buffer(mtd);
+
 	transBuf = transferBuffer;
 
 	/*
@@ -562,6 +585,10 @@ static int pnx8550_nand_verify_buf(struct mtd_info *mtd, const u_char * buf,
 	/* some sanity checking, word access only please */
 	if (len & 1) {
 		printk("%s: non-word aligned length\n", __FUNCTION__);
+	}
+
+	if((result = ensure_transfer_buffer(mtd))) {
+		return result;
 	}
 
 	pnx8550_nand_read_buf(mtd, transferBuffer, len);
@@ -1066,15 +1093,6 @@ int __init pnx8550_nand_init(void)
 	this->bbt_md  = &nand_mirror_bbt_decr;
 #endif
 
-	transferBuffer =
-	    kmalloc(pnx8550_mtd.writesize + pnx8550_mtd.oobsize,
-		    GFP_DMA | GFP_KERNEL);
-	if (!transferBuffer) {
-		printk(KERN_ERR
-		       "Unable to allocate NAND data buffer for PNX8550.\n");
-		return -ENOMEM;
-	}
-
 	/* Scan to find existence of the device */
 	if (nand_scan(&pnx8550_mtd, 1)) {
 		printk("%s: Exiting No Devices\n", __FUNCTION__);
@@ -1098,9 +1116,7 @@ static void __exit pnx8550_nand_cleanup(void)
 {
 	/* Unregister the device */
 	del_mtd_device(&pnx8550_mtd);
-	if (transferBuffer) {
-		kfree(transferBuffer);
-	}
+	kfree(transferBuffer);
 }
 
 module_exit(pnx8550_nand_cleanup);
