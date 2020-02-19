@@ -129,7 +129,7 @@ static struct nand_bbt_descr nand16bit_memorybased = {
  *  this is pretty evil, but since the end is used by the microBTM we don't
  *  have a real choice here
  */
-#ifdef MTD_NAND_PNX8550_BADBLOCK
+#ifdef CONFIG_MTD_NAND_PNX8550_BADBLOCK
 
 static u8 bbt_pattern[] = {'B', 'b', 't', '0' };
 static u8 mirror_pattern[] = {'1', 't', 'b', 'B' };
@@ -154,7 +154,7 @@ static struct nand_bbt_descr nand_mirror_bbt_decr = {
 
 #endif
 
-#ifdef MTD_NAND_WINCE_ECC
+#ifdef CONFIG_MTD_NAND_WINCE_ECC
 // wince oob placement
 static struct nand_ecclayout nand8bit_oob_wince = {
     .eccbytes = 6,
@@ -756,7 +756,7 @@ static void pnx8550_nand_hwcontrol(struct mtd_info *mtd, int cmd)
 }
 */
 
-#ifdef MTD_NAND_WINCE_ECC
+#ifdef CONFIG_MTD_NAND_WINCE_ECC
 
 static int pnx8550_nand_calculate_ecc(struct mtd_info *mtd, const u_char *dat,
 		       u_char *ecc_code)
@@ -878,7 +878,7 @@ static int pnx8550_nand_calculate_ecc(struct mtd_info *mtd, const u_char *dat,
 	*((u8*) a1 + 1) = t8;
 	*((u8*) a1 + 2) = v0;
 
-	DEBUG("ECC: %02x %02x %02x", ecc_code[0], ecc_code[1], ecc_code[2]);
+//	DEBUG("ECC: %02x %02x %02x", ecc_code[0], ecc_code[1], ecc_code[2]);
 
 	return 0;
 }
@@ -927,11 +927,11 @@ int pnx8550_nand_correct_data(struct mtd_info *mtd, u_char *dat, u_char *read_ec
 	if(is_buf_blank(dat, 256))
 		return 0;
 
-	ERROR( "exp: %02x %02x %02x got: %02x %02x %02x",
+	WARN(true, "exp: %02x %02x %02x got: %02x %02x %02x",
 			read_ecc[0], read_ecc[1], read_ecc[2],
 			calc_ecc[0], calc_ecc[1], calc_ecc[2]);
 
-	ERROR("Error correction not implemented!");
+	WARN(true, "Error correction not implemented!");
 	return -1;
 }
 
@@ -1040,7 +1040,7 @@ int __init pnx8550_nand_init(void)
 	this->verify_buf = pnx8550_nand_verify_buf;
 	this->dev_ready = pnx8550_nand_dev_ready;
 //	this->hwcontrol = pnx8550_nand_hwcontrol;
-#ifdef MTD_NAND_WINCE_ECC
+#ifdef CONFIG_MTD_NAND_WINCE_ECC
 	this->ecc.layout  = &nand8bit_oob_wince;
 
 	// only way to override the software ecc
