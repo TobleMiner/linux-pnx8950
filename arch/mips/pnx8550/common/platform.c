@@ -119,9 +119,15 @@ static struct platform_device pnx8550_uart_device = {
 	.resource	= pnx8550_uart_resources,
 };
 
+static struct platform_device pnx8550_nand_device = {
+	.name		= "pnx8550-nand",
+	.id		= -1,
+};
+
 static struct platform_device *pnx8550_platform_devices[] __initdata = {
 	&pnx8550_usb_ohci_device,
 	&pnx8550_uart_device,
+	&pnx8550_nand_device,
 };
 
 static int __init pnx8550_platform_init(void)
