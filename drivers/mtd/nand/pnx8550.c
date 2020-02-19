@@ -41,6 +41,9 @@
 #include <asm/io.h>
 #include <asm/mach-pnx8550/nand.h>
 
+#define XIO_ACK_TIMEOUT_US	2000000		// 2s wait for xio ack (in us)
+#define XIO_DMA_TIMEOUT_US	30000000	// 30s wait for dma (in us)
+
 #define NAND_ADDR(_col, _page) ((_col) & (pnx_nand.mtd.writesize - 1)) + ((_page) << this->page_shift)
 
 #define NAND_ADDR_SEND(_addr) pnx_nand.nand_mem[(_addr)/sizeof(u16)] = 0
@@ -55,10 +58,7 @@ static void pnx8550_nand_register_setup(u_char cmd_no, u_char addr_no,
 
 static inline void pnx8550_nand_wait_for_dev_ready(void);
 
-static void pnx8550_nand_transfer(void *from, void *to, int bytes, int toxio);
-
-static void pnx8550_nand_transferDMA(void *from, void *to, int bytes,
-				     int toxio);
+static void pnx8550_nand_transfer(void *from, void *to, size_t bytes, bool toxio);
 
 #define MTD_TO_PNX(mtd) ((struct pnx8550_nand*)(container_of(mtd, struct pnx8550_nand, mtd)))
 
@@ -185,54 +185,6 @@ static struct nand_ecclayout nand16bit_oob_16 = {
 };
 
 /**
- * Transfer data to/from the NAND chip.
- * This function decides whether to use DMA or not depending on
- * the amount of data to transfer and the alignment of the buffers.
- *
- * @from:  Address to transfer data from
- * @to:    Address to transfer the data to
- * @bytes: Number of bytes to transfer
- * @toxio: Whether the transfer is going to XIO or not.
- */
-static void pnx8550_nand_transfer(void *from, void *to, int bytes, int toxio)
-{
-	u16 *from16 = (u16 *) from;
-	u16 *to16 = (u16 *) to;
-
-	int i;
-
-	if ((u32) from & 3) {
-		pr_warning
-		    ("%s: from buffer not 32bit aligned, will not use fastest transfer mechanism\n",
-		     __FUNCTION__);
-	}
-	if ((u32) to & 3) {
-		pr_warning
-		    ("%s: to buffer not 32bit aligned, will not use fastest transfer mechanism\n",
-		     __FUNCTION__);
-	}
-
-	if (((bytes & 3) || (bytes < 16)) || ((u32) to & 3) || ((u32) from & 3)) {
-		if (((bytes & 1) == 0) &&
-		    (((u32) to & 1) == 0) && (((u32) from & 1) == 0)) {
-			int words = bytes / 2;
-
-			local_irq_disable();
-			for (i = 0; i < words; i++) {
-				to16[i] = from16[i];
-			}
-			local_irq_enable();
-		} else {
-			pr_warning
-			    ("%s: Transfer failed, byte-aligned transfers no allowed!\n",
-			     __FUNCTION__);
-		}
-	} else {
-		pnx8550_nand_transferDMA(from, to, bytes, toxio);
-	}
-}
-
-/**
  * Transfer data to/from the NAND chip using DMA
  *
  * @from:  Address to transfer data from
@@ -240,9 +192,9 @@ static void pnx8550_nand_transfer(void *from, void *to, int bytes, int toxio)
  * @bytes: Number of bytes to transfer
  * @toxio: Whether the transfer is going to XIO or not.
  */
-static void pnx8550_nand_transferDMA(void *from, void *to, int bytes, int toxio)
+static void pnx8550_nand_transferDMA(void *from, void *to, size_t bytes, bool toxio)
 {
-	int cmd = 0;
+	int cmd = 0, timeout = 0;
 	u32 internal;
 	u32 external;
 
@@ -265,12 +217,56 @@ static void pnx8550_nand_transferDMA(void *from, void *to, int bytes, int toxio)
 	PNX8550_DMA_CTRL = PNX8550_DMA_CTRL_BURST_512 |
 	    PNX8550_DMA_CTRL_SND2XIO | PNX8550_DMA_CTRL_INIT_DMA | cmd;
 
-	while ((PNX8550_DMA_INT_STATUS & PNX8550_DMA_INT_COMPL) == 0) ;
+	while ((PNX8550_DMA_INT_STATUS & PNX8550_DMA_INT_COMPL) == 0) {
+	    	udelay(1);
+    		timeout++;
+    		if(timeout > XIO_DMA_TIMEOUT_US) {
+			WARN(true, "Timeout on NAND DMA wait!");
+			BUG();
+		}
+	}
 
 	if (!toxio) {
 		dma_cache_inv((unsigned long)to, bytes);
 	}
 	local_irq_enable();
+}
+
+/**
+ * Transfer data to/from the NAND chip.
+ * This function decides whether to use DMA or not depending on
+ * the amount of data to transfer and the alignment of the buffers.
+ *
+ * @from:  Address to transfer data from
+ * @to:    Address to transfer the data to
+ * @bytes: Number of bytes to transfer
+ * @toxio: Whether the transfer is going to XIO or not.
+ */
+static void pnx8550_nand_transfer(void *from, void *to, size_t bytes, bool toxio)
+{
+	u16 *from16 = (u16 *) from;
+	u16 *to16 = (u16 *) to;
+
+	u32 i;
+
+	if (((bytes & 3) || (bytes < 16)) || ((u32) to & 3) || ((u32) from & 3)) {
+		if (((bytes & 1) == 0) &&
+		    (((u32) to & 1) == 0) && (((u32) from & 1) == 0)) {
+			size_t words = bytes / 2;
+
+			local_irq_disable();
+			for (i = 0; i < words; i++) {
+				to16[i] = from16[i];
+			}
+			local_irq_enable();
+		} else {
+			WARN
+			    (true, "%s: Transfer failed, byte-aligned transfers no allowed!\n",
+			     __FUNCTION__);
+		}
+	} else {
+		pnx8550_nand_transferDMA(from, to, bytes, toxio);
+	}
 }
 
 /**
@@ -411,7 +407,7 @@ static int ensure_transfer_buffer(struct mtd_info *mtd) {
  * @len:	number of bytes to write
  *
  */
-#define DONT_WRITE
+#undef DONT_WRITE
 static void pnx8550_nand_write_buf(struct mtd_info *mtd, const u_char * buf,
 				   int len)
 {
@@ -538,8 +534,8 @@ static void pnx8550_nand_read_buf(struct mtd_info *mtd, u_char * buf, int len)
 		pnx->address_page++;
 	}
 
-	pr_info("Read %d bytes from %px\n", len, &(pnx->nand_mem[addr / sizeof(u16)]));
-	print_hex_dump(KERN_INFO, "pnx8550 data read: ", DUMP_PREFIX_ADDRESS, 16, 1, buf, len, false);
+//	pr_info("Read %d bytes from %px\n", len, &(pnx->nand_mem[addr / sizeof(u16)]));
+//	print_hex_dump(KERN_INFO, "pnx8550 data read: ", DUMP_PREFIX_ADDRESS, 16, 1, buf, len, false);
 	return;
 }
 
@@ -738,7 +734,6 @@ static void pnx8550_nand_command(struct mtd_info *mtd, unsigned command,
 
 	case NAND_CMD_READ0:
 	case NAND_CMD_READ1:
-		pr_info("PNX8550 nand: Starting read from column %04x, page %08x\n", column, page_addr);
 		if (addr_no != 3)
 			pr_warning
 			    ("NAND: Error. Command %02x needs 3 byte address, but addr_no = %d\n",
@@ -790,7 +785,15 @@ static void pnx8550_nand_register_setup(u_char cmd_no,
  */
 static inline void pnx8550_nand_wait_for_dev_ready(void)
 {
-	while ((PNX8550_XIO_CTRL & PNX8550_XIO_CTRL_XIO_ACK) == 0) ;
+	int timeout = 0;
+	while ((PNX8550_XIO_CTRL & PNX8550_XIO_CTRL_XIO_ACK) == 0) {
+	    	udelay(1);
+    		timeout++;
+    		if(timeout > XIO_ACK_TIMEOUT_US) {
+			WARN(true, "Timeout on NAND ACK wait!");
+			BUG();
+		}
+	}
 }
 
 /*
@@ -972,11 +975,11 @@ int pnx8550_nand_correct_data(struct mtd_info *mtd, u_char *dat, u_char *read_ec
 	if(is_buf_blank(dat, 256))
 		return 0;
 
-	WARN(true, "exp: %02x %02x %02x got: %02x %02x %02x",
+	WARN_ONCE(true, "exp: %02x %02x %02x got: %02x %02x %02x",
 			read_ecc[0], read_ecc[1], read_ecc[2],
 			calc_ecc[0], calc_ecc[1], calc_ecc[2]);
 
-	WARN(true, "Error correction not implemented!");
+	WARN_ONCE(true, "Error correction not implemented!");
 	return -1;
 }
 
