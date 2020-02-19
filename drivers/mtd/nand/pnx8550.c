@@ -333,11 +333,11 @@ static void pnx8550_nand_transferDMA(void *from, void *to, int bytes, int toxio)
 }
 
 /**
- * pnx8550_nand_read_byte - read one byte endianess aware from the chip
+ * pnx8550_nand_read_byte16 - read one byte endianess aware from the chip (16 bit bus width)
  * @mtd:	MTD device structure
  *
  */
-static u_char pnx8550_nand_read_byte(struct mtd_info *mtd)
+static u_char pnx8550_nand_read_byte16(struct mtd_info *mtd)
 {
 	struct nand_chip *this = mtd->priv;
 	u16 data = 0;
@@ -361,6 +361,43 @@ static u_char pnx8550_nand_read_byte(struct mtd_info *mtd)
 		if ((addr & 0x1) == 1) {
 			data = (data & 0xff00) >> 16;
 		}
+	}
+	/*
+	   Status is a special case, we don't need to increment the address
+	   because the address isn't used by the chip
+	 */
+	if (last_command != NAND_CMD_STATUS) {
+		last_col_addr++;
+	}
+	return data & 0xff;
+}
+
+/**
+ * pnx8550_nand_read_byte8 - read one byte endianess aware from the chip (8 bit bus width)
+ * @mtd:	MTD device structure
+ *
+ */
+static u_char pnx8550_nand_read_byte8(struct mtd_info *mtd)
+{
+	struct nand_chip *this = mtd->priv;
+	u8 data = 0;
+	int addr = NAND_ADDR(last_col_addr, last_page_addr);
+	/*
+	   Read ID is a special case as we have to read BOTH bytes at the same
+	   time otherwise it doesn't work, once we have both bytes we work out
+	   which one we want.
+	 */
+	if (last_command == NAND_CMD_READID) {
+		u16 *pNandAddr16 = (u16 *) pNandAddr;
+		u16 data16;
+		data16 = cpu_to_le16(pNandAddr16[0]);
+		if (last_col_addr) {
+			data = (u8) (data16 >> 8);
+		} else {
+			data = (u8) data16;
+		}
+	} else {
+		data = cpu_to_le16(pNandAddr[addr]);
 	}
 	/*
 	   Status is a special case, we don't need to increment the address
@@ -1056,9 +1093,15 @@ int __init pnx8550_nand_init(void)
 	/* Link the private data with the MTD structure */
 	pnx8550_mtd.priv = this;
 	this->chip_delay = 15;
+#ifdef CONFIG_MTD_NAND_PNX8550_16BIT
 	this->options = NAND_BUSWIDTH_16;
+	this->read_byte = pnx8550_nand_read_byte16;
+	this->badblock_pattern = &nand16bit_memorybased;
+        this->ecc.layout  = &nand16bit_oob_16;
+#else
+	this->read_byte = pnx8550_nand_read_byte8;
+#endif
 	this->cmdfunc = pnx8550_nand_command;
-	this->read_byte = pnx8550_nand_read_byte;
 	this->read_word = pnx8550_nand_read_word;
 	this->read_buf = pnx8550_nand_read_buf;
 //	this->write_byte = pnx8550_nand_write_byte;
@@ -1084,11 +1127,9 @@ int __init pnx8550_nand_init(void)
 #else
 	this->ecc.mode     = NAND_ECC_SOFT;
 #endif
-	this->badblock_pattern = &nand16bit_memorybased;
-	this->ecclayout = &nand16bit_oob_16;
 //	this->autooob = &nand16bit_oob_16;
-#ifdef MTD_NAND_PNX8550_BADBLOCK
-//    this->options |= NAND_USE_FLASH_BBT;
+#ifdef CONFIG_MTD_NAND_PNX8550_BADBLOCK
+	this->bbt_options = NAND_BBT_USE_FLASH;
 	this->bbt_td  = &nand_main_bbt_decr;
 	this->bbt_md  = &nand_mirror_bbt_decr;
 #endif
