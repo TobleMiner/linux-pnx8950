@@ -637,6 +637,11 @@ static int pnx8550_nand_verify_buf(struct mtd_info *mtd, const u_char * buf,
 
 }
 
+// Empty control command handler, might replace pnx8550_nand_command through this one later
+static void pnx8550_nand_cmd_ctrl(struct mtd_info *mtd, int dat, unsigned int ctrl) {
+
+}
+
 /**
  * pnx8550_nand_command - Send command to NAND device
  * @mtd:	MTD device structure
@@ -1101,6 +1106,7 @@ int __init pnx8550_nand_init(void)
 #else
 	this->read_byte = pnx8550_nand_read_byte8;
 #endif
+	this->cmd_ctrl = pnx8550_nand_cmd_ctrl;
 	this->cmdfunc = pnx8550_nand_command;
 	this->read_word = pnx8550_nand_read_word;
 	this->read_buf = pnx8550_nand_read_buf;
