@@ -198,6 +198,8 @@ static void pnx8550_nand_transferDMA(void *from, void *to, size_t bytes, bool to
 	int cmd = 0, timeout = 0;
 	u32 internal;
 	u32 external;
+	bool dma_timeout = false, dma_abort = false, dma_nonsup = false;
+	unsigned long dma_status;
 
 	if (toxio) {
 		cmd = PNX8550_DMA_CTRL_PCI_CMD_WRITE;
@@ -218,13 +220,20 @@ static void pnx8550_nand_transferDMA(void *from, void *to, size_t bytes, bool to
 	PNX8550_DMA_CTRL = PNX8550_DMA_CTRL_BURST_512 |
 	    PNX8550_DMA_CTRL_SND2XIO | PNX8550_DMA_CTRL_INIT_DMA | cmd;
 
-	while ((PNX8550_DMA_INT_STATUS & PNX8550_DMA_INT_COMPL) == 0) {
-	    	udelay(1);
-    		timeout++;
-    		if(timeout > XIO_DMA_TIMEOUT_US) {
-			WARN(true, "Timeout on NAND DMA from %p %s-> %p%s!",
-			  from, toxio ? "" : "(XIO) ", to, toxio ? " (XIO)" : "");
-			BUG();
+	while (((dma_status = PNX8550_DMA_INT_STATUS) & PNX8550_DMA_INT_COMPL) == 0) {
+		udelay(1);
+		timeout++;
+		if(timeout > XIO_DMA_TIMEOUT_US) {
+			dma_timeout = true;
+			break;
+		}
+		if(dma_status & PNX8550_DMA_INT_ABORT) {
+			dma_abort = true;
+			break;
+		}
+		if(dma_status & PNX8550_DMA_INT_NONSUP) {
+			dma_nonsup = true;
+			break;
 		}
 	}
 
@@ -232,6 +241,16 @@ static void pnx8550_nand_transferDMA(void *from, void *to, size_t bytes, bool to
 		dma_cache_inv((unsigned long)to, bytes);
 	}
 	local_irq_enable();
+	if(dma_timeout) {
+		WARN(true, "Timeout on NAND DMA from %p %s-> %p%s!",
+		  from, toxio ? "" : "(XIO) ", to, toxio ? " (XIO)" : "");
+		BUG();
+	}
+	if(dma_abort || dma_nonsup) {
+		WARN(true, "NAND DMA from %p %s-> %p%s failed",
+		  from, toxio ? "" : "(XIO) ", to, toxio ? " (XIO)" : "");
+		BUG();
+	}
 }
 
 /**
