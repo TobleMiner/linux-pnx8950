@@ -1,3 +1,20 @@
+WARNING:
+
+While this kernel is intended for use on a STB810 platform it has major issues:
+
+1. Random segfaults and FPU exceptions:
+  Expect userspace software to crash a lot. There seem to be major memory management
+  issues.
+2. NAND flash beyond 32MiB not accessible:
+  Probably a memory mapping or XIO NAND peripheral configuration error. Hard to tell
+  without a proper technical reference manual.
+  Note to anyone insane enough to try fixing it: ioremapping the flash MMIO area does
+  not work at all, results in corrupted reads.
+
+Also if anyone happens to have a technical reference manual for the PNX8950/PNX8550,
+please consider sharing it with me. Just write me a DM on Twitter or send it to
+pnx.stb810(at)t-sys(dot)eu
+
 	Linux kernel release 3.x <http://kernel.org/>
 
 These are the release notes for Linux version 3.  Read them carefully,
