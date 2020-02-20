@@ -222,7 +222,8 @@ static void pnx8550_nand_transferDMA(void *from, void *to, size_t bytes, bool to
 	    	udelay(1);
     		timeout++;
     		if(timeout > XIO_DMA_TIMEOUT_US) {
-			WARN(true, "Timeout on NAND DMA wait!");
+			WARN(true, "Timeout on NAND DMA from %p %s-> %p%s!",
+			  from, toxio ? "" : "(XIO) ", to, toxio ? " (XIO)" : "");
 			BUG();
 		}
 	}
