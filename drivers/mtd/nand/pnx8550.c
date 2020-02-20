@@ -780,9 +780,9 @@ static inline void pnx8550_nand_wait_for_dev_ready(void)
 {
 	int timeout = 0;
 	while ((PNX8550_XIO_CTRL & PNX8550_XIO_CTRL_XIO_ACK) == 0) {
-	    	udelay(1);
-    		timeout++;
-    		if(timeout > XIO_ACK_TIMEOUT_US) {
+		udelay(1);
+		timeout++;
+		if(timeout > XIO_ACK_TIMEOUT_US) {
 			WARN(true, "Timeout on NAND ACK wait!");
 			BUG();
 		}
@@ -1077,7 +1077,7 @@ static int pnx8550_nand_probe(struct platform_device *pdev)
 	this->options = NAND_BUSWIDTH_16;
 	this->read_byte = pnx8550_nand_read_byte16;
 	this->badblock_pattern = &nand16bit_memorybased;
-        this->ecc.layout  = &nand16bit_oob_16;
+	this->ecc.layout  = &nand16bit_oob_16;
 #else
 	this->read_byte = pnx8550_nand_read_byte8;
 #endif
@@ -1092,16 +1092,16 @@ static int pnx8550_nand_probe(struct platform_device *pdev)
 	this->ecc.layout  = &nand8bit_oob_wince;
 
 	// only way to override the software ecc
-	this->ecc.mode      = NAND_ECC_HW;
+	this->ecc.mode	    = NAND_ECC_HW;
 	this->ecc.calculate = pnx8550_nand_calculate_ecc;
-	this->ecc.hwctl     = pnx8550_nand_ecc_hwctrl;
+	this->ecc.hwctl	    = pnx8550_nand_ecc_hwctrl;
 	this->ecc.correct   = pnx8550_nand_correct_data;
-	this->ecc.size      = 256;
-	this->ecc.bytes     = 3;
+	this->ecc.size	    = 256;
+	this->ecc.bytes	    = 3;
 	this->ecc.read_page  = pnx8550_nand_read_page_swecc;
 	this->ecc.write_page = pnx8550_nand_write_page_swecc;
 #else
-	this->ecc.mode     = NAND_ECC_SOFT;
+	this->ecc.mode	   = NAND_ECC_SOFT;
 #endif
 #ifdef CONFIG_MTD_NAND_PNX8550_BADBLOCK
 	this->bbt_options = NAND_BBT_USE_FLASH;
